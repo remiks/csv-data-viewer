@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <meta charset="UTF-8">
+    <title>CSV Data Viewer</title>
+    <!-- Include Bootstrap CSS -->
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css" />
+    <!-- Include DataTables CSS -->
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.4/css/dataTables.bootstrap4.min.css" />
+    <!-- Include custom styles -->
+    <style>
+        body {
+            padding: 20px;
+        }
+
+        h1 {
+            margin-bottom: 30px;
+            text-align: center;
+        }
+
+        #chartsRow {
+            display: flex;
+            flex-wrap: wrap;
+            justify-content: center;
+            align-items: flex-start;
+            margin-bottom: 90px;
+        }
+
+        .chart-container {
+            width: 300px;
+            height: 300px;
+            margin: 10px;
+            text-align: center;
+        }
+
+        .chart-container canvas {
+            width: 100% !important;
+            height: 100% !important;
+        }
+
+        .top-table {
+            margin: 10px;
+            width: 300px;
+        }
+
+        .dataTables_wrapper .dt-buttons {
+            float: none;
+            margin-right: 10px;
+            margin-top: 5px;
+        }
+
+        .dataTables_filter {
+            display: none;
+            /* Hide the default search field */
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container-fluid">
+        <h1>CSV Data Viewer</h1>
+        <!-- Charts Row -->
+        <div id="chartsRow">
+            <div class="chart-container">
+                <h5>Customer Cost by Entitlement Description</h5>
+                <canvas id="entitlementChart"></canvas>
+            </div>
+            <div class="chart-container">
+                <h5>Customer Cost by Usage Type</h5>
+                <canvas id="usageTypeChart"></canvas>
+            </div>
+            <!-- Top 5 Entitlement Description Table -->
+            <div class="top-table">
+                <h5>Top 5 Subscriptions</h5>
+                <table id="topEntitlementTable" class="table table-striped table-bordered">
+                    <!-- Table data will be inserted here -->
+                </table>
+            </div>
+            <!-- Usage Type Summary Table -->
+            <div class="top-table">
+                <h5>Cost by Usage Type</h5>
+                <table id="usageTypeSummaryTable" class="table table-striped table-bordered">
+                    <!-- Table data will be inserted here -->
+                </table>
+            </div>
+        </div>
+        <!-- Controls Div -->
+        <div id="controls" class="form-group">
+            <div class="row">
+                <div class="col-md-3">
+                    <label for="csvFile">Select CSV file:</label>
+                    <input type="file" id="csvFile" accept=".csv" class="form-control-file" />
+                </div>
+                <div class="col-md-3">
+                    <label for="customerSelect">Select Customer:</label>
+                    <select id="customerSelect" class="form-control">
+                        <option value="All">All Customers</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label for="searchInput">Search:</label>
+                    <input type="text" id="searchInput" class="form-control" placeholder="Search...">
+                </div>
+                <div class="col-md-3">
+                    <div class="btn-group mt-4" role="group">
+                        <button id="exportCsvButton" class="btn btn-success">Export CSV</button>
+                        <button id="exportExcelButton" class="btn btn-primary">Export Excel</button>
+                        <button id="exportPdfButton" class="btn btn-danger">Export PDF</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <!-- Data Table -->
+        <div id="tableContainer" class="mt-4">
+            <table id="dataTable" class="table table-striped table-bordered" style="width: 100%;">
+                <!-- Table headers and data will be inserted here -->
+            </table>
+        </div>
+    </div>
+
+    <!-- Include scripts here -->
+    <!-- Include jQuery -->
+    <script src="https://code.jquery.com/jquery-3.5.1.min.js" crossorigin="anonymous"></script>
+    <!-- Include Bootstrap JS -->
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js" crossorigin="anonymous"></script>
+    <!-- Include Papa Parse -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/PapaParse/5.3.2/papaparse.min.js"></script>
+    <!-- Include DataTables JS -->
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/dataTables.bootstrap4.min.js"></script>
+    <!-- Include DataTables Buttons extension for export -->
+    <script src="https://cdn.datatables.net/buttons/2.3.6/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.bootstrap4.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.1.3/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.1.53/vfs_fonts.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.3.6/js/buttons.print.min.js"></script>
+    <!-- Include Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script>
+        document.addEventListener('DOMContentLoaded', function () {
+            let csvData = [];
+            let filteredData = [];
+            let customerNames = [];
+            let dataTable = null;
+            let entitlementChart = null;
+            let usageTypeChart = null;
+
+            const csvFileInput = document.getElementById('csvFile');
+            const customerSelect = document.getElementById('customerSelect');
+            const searchInput = document.getElementById('searchInput');
+            const exportCsvButton = document.getElementById('exportCsvButton');
+            const exportExcelButton = document.getElementById('exportExcelButton');
+            const exportPdfButton = document.getElementById('exportPdfButton');
+
+            function cleanCustomerName(name) {
+                if (!name) return '';
+                return name.replace(/\s*\(.*?\)\s*/g, '').trim();
+            }
+
+            csvFileInput.addEventListener('change', function (event) {
+                const file = event.target.files[0];
+                if (file) {
+                    Papa.parse(file, {
+                        header: true,
+                        skipEmptyLines: true,
+                        complete: function (results) {
+                            csvData = results.data;
+                            // Clean Customer Names in csvData
+                            csvData.forEach(function (row) {
+                                row['Customer Name'] = cleanCustomerName(row['Customer Name']);
+                            });
+                            initialize();
+                        },
+                        error: function (err) {
+                            alert('Error reading CSV file: ' + err);
+                        }
+                    });
+                }
+            });
+
+            customerSelect.addEventListener('change', function () {
+                filterData();
+                renderTable();
+                renderCharts();
+                renderTopEntitlementTable();
+                renderUsageTypeSummaryTable();
+            });
+
+            searchInput.addEventListener('input', function () {
+                if (dataTable) {
+                    dataTable.search(this.value).draw();
+                }
+            });
+
+            exportCsvButton.addEventListener('click', function () {
+                if (dataTable) {
+                    dataTable.button('.buttons-csv').trigger();
+                }
+            });
+
+            exportExcelButton.addEventListener('click', function () {
+                if (dataTable) {
+                    dataTable.button('.buttons-excel').trigger();
+                }
+            });
+
+            exportPdfButton.addEventListener('click', function () {
+                if (dataTable) {
+                    dataTable.button('.buttons-pdf').trigger();
+                }
+            });
+
+            function initialize() {
+                populateCustomerDropdown();
+                filterData();
+                renderTable();
+                renderCharts();
+                renderTopEntitlementTable();
+                renderUsageTypeSummaryTable();
+            }
+
+            function populateCustomerDropdown() {
+                const customerSet = new Set();
+                customerSet.add('All');
+                csvData.forEach(function (row) {
+                    customerSet.add(row['Customer Name']);
+                });
+                customerNames = Array.from(customerSet).sort();
+                customerSelect.innerHTML = '';
+                customerNames.forEach(function (name) {
+                    const option = document.createElement('option');
+                    option.value = name;
+                    option.textContent = name;
+                    customerSelect.appendChild(option);
+                });
+            }
+
+            function filterData() {
+                const selectedCustomer = customerSelect.value;
+                if (selectedCustomer === 'All') {
+                    filteredData = csvData;
+                } else {
+                    filteredData = csvData.filter(function (row) {
+                        return row['Customer Name'] === selectedCustomer;
+                    });
+                }
+            }
+
+            function renderTable() {
+                if (dataTable) {
+                    dataTable.destroy();
+                    $('#dataTable').empty();
+                }
+                if (filteredData.length === 0) {
+                    $('#dataTable').html('<tr><td>No data available</td></tr>');
+                    return;
+                }
+                // Create table headers
+                const headers = Object.keys(filteredData[0]);
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                headers.forEach(function (header) {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    headerRow.appendChild(th);
+                });
+                thead.appendChild(headerRow);
+                document.getElementById('dataTable').appendChild(thead);
+                // Create table body
+                const tbody = document.createElement('tbody');
+                filteredData.forEach(function (row) {
+                    const tr = document.createElement('tr');
+                    headers.forEach(function (header) {
+                        const td = document.createElement('td');
+                        td.textContent = row[header];
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+                document.getElementById('dataTable').appendChild(tbody);
+
+                // Initialize DataTable with sorting and export options
+                dataTable = $('#dataTable').DataTable({
+                    dom: 'lBfrtip',
+                    lengthMenu: [[10, 50, 100, 1000], [10, 50, 100, 1000]],
+                    buttons: [
+                        {
+                            extend: 'csvHtml5',
+                            text: 'Export CSV',
+                            className: 'd-none', // Hide the default button
+                            filename: function () {
+                                let customerName = customerSelect.value || 'All_Customers';
+                                customerName = customerName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                                return 'Data_' + customerName;
+                            }
+                        },
+                        {
+                            extend: 'excelHtml5',
+                            text: 'Export Excel',
+                            className: 'd-none',
+                            filename: function () {
+                                let customerName = customerSelect.value || 'All_Customers';
+                                customerName = customerName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                                return 'Data_' + customerName;
+                            }
+                        },
+                        {
+                            extend: 'pdfHtml5',
+                            text: 'Export PDF',
+                            className: 'd-none',
+                            filename: function () {
+                                let customerName = customerSelect.value || 'All_Customers';
+                                customerName = customerName.replace(/[^a-z0-9]/gi, '_').toLowerCase();
+                                return 'Data_' + customerName;
+                            }
+                        }
+                    ],
+                    order: [],
+                    columnDefs: [
+                        { type: 'num', targets: getNumericColumnIndices(headers) }
+                    ]
+                });
+            }
+
+            function getNumericColumnIndices(headers) {
+                const numericColumns = [];
+                filteredData.forEach(function (row) {
+                    headers.forEach(function (header, index) {
+                        if (numericColumns.includes(index)) return;
+                        const value = row[header];
+                        if (!isNaN(parseNumber(value))) {
+                            numericColumns.push(index);
+                        }
+                    });
+                });
+                return numericColumns;
+            }
+
+            function renderCharts() {
+                renderEntitlementChart();
+                renderUsageTypeChart();
+            }
+
+            function renderEntitlementChart() {
+                const data = aggregateData('Entitlement Description');
+                // Destroy previous chart if exists
+                if (entitlementChart) {
+                    entitlementChart.destroy();
+                }
+                const ctx = document.getElementById('entitlementChart').getContext('2d');
+                entitlementChart = new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'Customer Cost (NOK)',
+                            data: data.values,
+                            backgroundColor: data.labels.map((_, index) => softColors[index % softColors.length]),
+                            borderColor: '#fff',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: false,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                            }
+                        }
+                    }
+                });
+            }
+
+            function renderUsageTypeChart() {
+                const data = aggregateData('Usage Type');
+                // Destroy previous chart if exists
+                if (usageTypeChart) {
+                    usageTypeChart.destroy();
+                }
+                const ctx = document.getElementById('usageTypeChart').getContext('2d');
+                usageTypeChart = new Chart(ctx, {
+                    type: 'pie',
+                    data: {
+                        labels: data.labels,
+                        datasets: [{
+                            label: 'Customer Cost (NOK)',
+                            data: data.values,
+                            backgroundColor: data.labels.map((_, index) => softColors[index % softColors.length]),
+                            borderColor: '#fff',
+                            borderWidth: 1
+                        }]
+                    },
+                    options: {
+                        responsive: false,
+                        maintainAspectRatio: false,
+                        plugins: {
+                            legend: {
+                                position: 'bottom',
+                            }
+                        }
+                    }
+                });
+            }
+
+            function renderTopEntitlementTable() {
+                const data = aggregateData('Entitlement Description');
+                // Combine labels and values into an array of objects
+                const combinedData = data.labels.map((label, index) => {
+                    return {
+                        'Entitlement Description': label,
+                        'Customer Cost (NOK)': data.values[index]
+                    };
+                });
+                // Sort the data by Customer Cost in descending order
+                combinedData.sort((a, b) => b['Customer Cost (NOK)'] - a['Customer Cost (NOK)']);
+                // Take the top 5
+                const topFive = combinedData.slice(0, 5);
+
+                // Build the table
+                const table = document.getElementById('topEntitlementTable');
+                table.innerHTML = '';
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                ['Entitlement Description', 'Customer Cost (NOK)'].forEach(function (header) {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    headerRow.appendChild(th);
+                });
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                topFive.forEach(function (row) {
+                    const tr = document.createElement('tr');
+                    ['Entitlement Description', 'Customer Cost (NOK)'].forEach(function (header) {
+                        const td = document.createElement('td');
+                        td.textContent = header === 'Customer Cost (NOK)' ? formatNumber(row[header]) : row[header];
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+                table.appendChild(tbody);
+            }
+
+            function renderUsageTypeSummaryTable() {
+                const data = aggregateData('Usage Type');
+                // Combine labels and values into an array of objects
+                const combinedData = data.labels.map((label, index) => {
+                    return {
+                        'Usage Type': label,
+                        'Customer Cost (NOK)': data.values[index]
+                    };
+                });
+
+                // Build the table
+                const table = document.getElementById('usageTypeSummaryTable');
+                table.innerHTML = '';
+                const thead = document.createElement('thead');
+                const headerRow = document.createElement('tr');
+                ['Usage Type', 'Customer Cost (NOK)'].forEach(function (header) {
+                    const th = document.createElement('th');
+                    th.textContent = header;
+                    headerRow.appendChild(th);
+                });
+                thead.appendChild(headerRow);
+                table.appendChild(thead);
+
+                const tbody = document.createElement('tbody');
+                let totalCost = 0;
+                combinedData.forEach(function (row) {
+                    const tr = document.createElement('tr');
+                    ['Usage Type', 'Customer Cost (NOK)'].forEach(function (header) {
+                        const td = document.createElement('td');
+                        if (header === 'Customer Cost (NOK)') {
+                            td.textContent = formatNumber(row[header]);
+                            totalCost += row[header];
+                        } else {
+                            td.textContent = row[header];
+                        }
+                        tr.appendChild(td);
+                    });
+                    tbody.appendChild(tr);
+                });
+                // Add total row
+                const totalRow = document.createElement('tr');
+                const totalLabelCell = document.createElement('td');
+                totalLabelCell.textContent = 'Total';
+                const totalValueCell = document.createElement('td');
+                totalValueCell.textContent = formatNumber(totalCost);
+                totalRow.appendChild(totalLabelCell);
+                totalRow.appendChild(totalValueCell);
+                totalRow.style.fontWeight = 'bold';
+                tbody.appendChild(totalRow);
+
+                table.appendChild(tbody);
+            }
+
+            function aggregateData(key) {
+                const aggregated = {};
+                filteredData.forEach(function (row) {
+                    const fieldValue = row[key] || 'Unknown';
+                    const cost = parseNumber(row['Customer Cost (NOK)']);
+                    if (aggregated[fieldValue]) {
+                        aggregated[fieldValue] += cost;
+                    } else {
+                        aggregated[fieldValue] = cost;
+                    }
+                });
+                const labels = Object.keys(aggregated);
+                const values = Object.values(aggregated);
+                return { labels, values };
+            }
+
+            // Define a palette of soft colours
+            const softColors = [
+                '#A6CEE3', '#1F78B4', '#B2DF8A', '#33A02C',
+                '#FB9A99', '#E31A1C', '#FDBF6F', '#FF7F00',
+                '#CAB2D6', '#6A3D9A', '#FFFF99', '#B15928',
+                '#6AB7C6', '#F6B5C1', '#C0D6E4', '#D1C4E9'
+            ];
+
+            function parseNumber(value) {
+                if (typeof value === 'string') {
+                    // Remove commas and spaces
+                    value = value.replace(/,/g, '').replace(/\s/g, '');
+                }
+                return parseFloat(value) || 0;
+            }
+
+            function formatNumber(value) {
+                return value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+            }
+        });
+    </script>
+</body>
+
+</html>
